@@ -11,6 +11,8 @@ DATAS SEGMENT
 	keyDown db 73h
 	keyLeft db 61h
 	keyRight db 64h
+	keyEnter db 0dh
+	keyEsc db 27
 
 	; 蛇的信息
 	; snake 每个元素占 4 个字节，其中
@@ -26,9 +28,10 @@ DATAS SEGMENT
 	food_pos dw 1A08h
 
 	; 游戏状态信息
-	gameover_msg db "Game over! (Esc)","$"
-	gameready_msg db "Press [Enter] to start the game","$"
-	score_msg db "Score:","$"
+	score dw 0
+	gameover_msg db 'Game over! (Esc)','$'
+	gameready_msg db 'Press [Enter] to start the game','$'
+	score_msg db 'Score:','$'
 
 	oldX db ?
 	oldY db	?
@@ -49,6 +52,13 @@ main proc far
 	MOV AX,DATAS
 	MOV DS,AX
 	
+	call printGameReadyMsg
+	waitToStart:
+	mov ah,01
+	int 21h
+	cmp al,keyEnter
+	jnz waitToStart
+
 	;保存旧的 1CH 中断向量
 	MOV AL,1CH
 	MOV AH,35H
@@ -76,6 +86,7 @@ main proc far
 	playing:
 	cmp gameover,0
 	jz main_end
+	
 	call listenKeyPress
 	cmp al,keyUp
 	jz setUp
@@ -110,6 +121,16 @@ main proc far
 	mov ah,25h
 	int 21h
 
+	waitToExit:
+	mov ah,01h
+	int 21H
+	cmp al,keyEsc
+	jnz waitToExit
+	
+	mov dl,'u'
+	mov ah,02h
+	int 21h
+
 	MOV AH,4CH
 	INT 21H
 main endp
@@ -136,6 +157,7 @@ new_int_1ch proc near
 	mov count,9
 	call clearScreen			;清屏
 	call drawFood					;渲染食物
+	call printScoreMsg		;打印分数
 	call snakeMove				;蛇移动一格
 	call drawSnake				;渲染蛇
 
@@ -147,12 +169,7 @@ new_int_1ch proc near
 	mov gameover,0
 	;打印结束信息	
 	call clearScreen
-	mov dh,10
-	mov dl,25
-	mov dx,seg gameover_msg
-	mov ds,dx
-	mov dx,offset gameover_msg
-	call printMsg
+	call printGameOverMsg
 	jmp exit
 
 	checkNext:
@@ -163,6 +180,7 @@ new_int_1ch proc near
 	;吃到了食物
 	call createFoodPos
 	call addSnakeLen
+	inc word ptr [score]
 	
  ;中断返回
   exit:
@@ -178,14 +196,71 @@ new_int_1ch endp
 ;-------------------------------------
 ; 打印信息
 ;-------------------------------------
-printMsg proc near
-	push ax
-
+printGameOverMsg proc near
+	mov dh,10
+	mov dl,25
+	mov bh,0
+	mov ah,2
+	int 10h
+	mov dx,seg gameover_msg
+	mov ds,dx
+	mov dx,offset gameover_msg
 	mov ah,09h
 	int 21h
+	ret
+printGameOverMsg endp
 
+printGameReadyMsg proc near
+	mov dh,10
+	mov dl,25
+	mov bh,0
+	mov ah,2
+	int 10h
+	mov dx,seg gameready_msg
+	mov ds,dx
+	mov dx,offset gameready_msg
+	mov ah,09h
+	int 21h
+	ret
+printGameReadyMsg endp
+
+printScoreMsg proc near
+	mov dx,0
+	mov bh,0
+	mov ah,2
+	int 10h
+	mov dx,seg score_msg
+	mov ds,dx
+	mov dx,offset score_msg
+	mov ah,09h
+	int 21h
+	call showScore
+	ret
+printScoreMsg endp
+
+showScore proc near
+	push bx
+	push ax
+	push dx
+
+	mov bx,10
+	mov ax,[score]
+show:
+	xor dx,dx 
+	div bx
+	push ax
+	add dl,30h
+	mov ah,02h
+	int 21h
 	pop ax
-printMsg endp
+	cmp ax,0
+	jne show
+
+	pop dx
+	pop ax
+	pop bx
+	ret
+showScore endp
 ;-------------------------------------
 ; 清屏
 ;-------------------------------------
@@ -228,13 +303,13 @@ addSnakeLen proc near
 	je updateLeft
 
 	updateUp:						;向下增加结点，行号++
-	inc byte ptr	[snake+si]	
+	inc byte ptr [snake+si]	
 	jmp addSnakeLen_end
 	updateRight:				;向左增加结点，列号--
 	dec byte ptr [snake+si+1]
 	jmp addSnakeLen_end
 	updateDown:					;向上增加结点，行号--
-	dec byte ptr	[snake+si]	
+	dec byte ptr [snake+si]	
 	jmp addSnakeLen_end
 	updateLeft:					;向右增加结点，列号++
 	inc byte ptr [snake+si+1]
@@ -453,6 +528,7 @@ drawSnake proc near
 	push di
 
 	mov si,0
+
 	drawSnakeNode:
 	mov di,si
 	shl di,1
@@ -461,7 +537,18 @@ drawSnake proc near
 	mov bh,0
 	mov ah,2
 	int 10h
-	mov dl,'a'
+
+	cmp si,0
+	jz printHead
+
+	printBody:
+	mov dl,'*'
+	jmp print
+
+	printHead:
+	mov dl,'#'
+
+	print:
 	mov ah,02h
 	int 21h
 
